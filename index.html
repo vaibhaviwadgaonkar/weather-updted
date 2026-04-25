@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>India Weather Intelligence Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #101b31;
+      --panel2: #0f1a2d;
+      --line: #24385e;
+      --text: #eaf1ff;
+      --muted: #9fb3d3;
+      --accent: #61adff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #0d1830;
+    }
+    .title { font-weight: 700; font-size: 17px; }
+    .controls {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    .search {
+      background: #0d1b34;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 250px;
+      outline: none;
+    }
+    .btn {
+      background: #16315b;
+      color: #dfeeff;
+      border: 1px solid #29508f;
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+    .status {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 12px;
+      background: #0f2447;
+      color: #d7e8ff;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 58% 42%;
+      height: calc(100vh - 73px);
+    }
+    #map { width: 100%; height: 100%; }
+    .panel {
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+      overflow: auto;
+      padding: 12px;
+    }
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: var(--panel2);
+    }
+    h2, h3 { margin: 0 0 8px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    ul { margin: 6px 0 0 18px; }
+    li { margin-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; }
+    .score { font-size: 26px; color: var(--accent); font-weight: 700; }
+    .sev-Low { background: #1b3a2d; border-color: #2a6148; }
+    .sev-Moderate { background: #3b321a; border-color: #6e5e2f; }
+    .sev-High, .sev-Extreme { background: #3f1d1d; border-color: #6f3131; }
+    @media (max-width: 900px) {
+      .topbar { grid-template-columns: 1fr; }
+      .layout { grid-template-columns: 1fr; grid-template-rows: 45% 55%; height: calc(100vh - 110px); }
+      .panel { border-left: none; border-top: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <div class="title">🗺️ India Weather Intelligence Map (All-City Mode)</div>
+      <div class="status">
+        <span class="pill" id="modePill">Dataset: Loading...</span>
+        <span class="pill" id="cityCountPill">Cities: 0</span>
+        <span class="pill" id="markerCountPill">Visible Markers: 0</span>
+      </div>
+    </div>
+    <div class="controls">
+      <input id="citySearch" class="search" list="cityOptions" placeholder="Search city, state (e.g., Jaipur, Rajasthan)" />
+      <datalist id="cityOptions"></datalist>
+      <button class="btn" id="goBtn">Go</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div id="map"></div>
+    <div class="panel" id="panel">
+      <div class="section">
+        <h2>Welcome</h2>
+        <p class="muted">Search or click any marker to view:</p>
+        <ul>
+          <li>1) Weather Forecast</li>
+          <li>2) Basic Weather</li>
+          <li>3) Hyper Local Alerts</li>
+          <li>4) Farmer Advice</li>
+          <li>5) Safety Tips</li>
+          <li>6) AI Prediction</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const INDIA_CITY_FALLBACK = [
+      {name:"Delhi",state:"Delhi",lat:28.6139,lon:77.2090},{name:"Mumbai",state:"Maharashtra",lat:19.0760,lon:72.8777},
+      {name:"Pune",state:"Maharashtra",lat:18.5204,lon:73.8567},{name:"Nagpur",state:"Maharashtra",lat:21.1458,lon:79.0882},
+      {name:"Nashik",state:"Maharashtra",lat:19.9975,lon:73.7898},{name:"Nanded",state:"Maharashtra",lat:19.1383,lon:77.3210},
+      {name:"Aurangabad",state:"Maharashtra",lat:19.8762,lon:75.3433},{name:"Kolhapur",state:"Maharashtra",lat:16.7050,lon:74.2433},
+      {name:"Solapur",state:"Maharashtra",lat:17.6599,lon:75.9064},{name:"Ahmedabad",state:"Gujarat",lat:23.0225,lon:72.5714},
+      {name:"Surat",state:"Gujarat",lat:21.1702,lon:72.8311},{name:"Vadodara",state:"Gujarat",lat:22.3072,lon:73.1812},
+      {name:"Rajkot",state:"Gujarat",lat:22.3039,lon:70.8022},{name:"Jaipur",state:"Rajasthan",lat:26.9124,lon:75.7873},
+      {name:"Jodhpur",state:"Rajasthan",lat:26.2389,lon:73.0243},{name:"Udaipur",state:"Rajasthan",lat:24.5854,lon:73.7125},
+      {name:"Kota",state:"Rajasthan",lat:25.2138,lon:75.8648},{name:"Bhopal",state:"Madhya Pradesh",lat:23.2599,lon:77.4126},
+      {name:"Indore",state:"Madhya Pradesh",lat:22.7196,lon:75.8577},{name:"Gwalior",state:"Madhya Pradesh",lat:26.2183,lon:78.1828},
+      {name:"Jabalpur",state:"Madhya Pradesh",lat:23.1815,lon:79.9864},{name:"Lucknow",state:"Uttar Pradesh",lat:26.8467,lon:80.9462},
+      {name:"Kanpur",state:"Uttar Pradesh",lat:26.4499,lon:80.3319},{name:"Varanasi",state:"Uttar Pradesh",lat:25.3176,lon:82.9739},
+      {name:"Agra",state:"Uttar Pradesh",lat:27.1767,lon:78.0081},{name:"Prayagraj",state:"Uttar Pradesh",lat:25.4358,lon:81.8463},
+      {name:"Patna",state:"Bihar",lat:25.5941,lon:85.1376},{name:"Gaya",state:"Bihar",lat:24.7914,lon:85.0002},
+      {name:"Ranchi",state:"Jharkhand",lat:23.3441,lon:85.3096},{name:"Jamshedpur",state:"Jharkhand",lat:22.8046,lon:86.2029},
+      {name:"Kolkata",state:"West Bengal",lat:22.5726,lon:88.3639},{name:"Siliguri",state:"West Bengal",lat:26.7271,lon:88.3953},
+      {name:"Durgapur",state:"West Bengal",lat:23.5204,lon:87.3119},{name:"Bhubaneswar",state:"Odisha",lat:20.2961,lon:85.8245},
+      {name:"Cuttack",state:"Odisha",lat:20.4625,lon:85.8830},{name:"Puri",state:"Odisha",lat:19.8135,lon:85.8312},
+      {name:"Raipur",state:"Chhattisgarh",lat:21.2514,lon:81.6296},{name:"Bilaspur",state:"Chhattisgarh",lat:22.0796,lon:82.1391},
+      {name:"Hyderabad",state:"Telangana",lat:17.3850,lon:78.4867},{name:"Warangal",state:"Telangana",lat:17.9689,lon:79.5941},
+      {name:"Nizamabad",state:"Telangana",lat:18.6725,lon:78.0941},{name:"Bengaluru",state:"Karnataka",lat:12.9716,lon:77.5946},
+      {name:"Mysuru",state:"Karnataka",lat:12.2958,lon:76.6394},{name:"Mangaluru",state:"Karnataka",lat:12.9141,lon:74.8560},
+      {name:"Hubballi",state:"Karnataka",lat:15.3647,lon:75.1240},{name:"Chennai",state:"Tamil Nadu",lat:13.0827,lon:80.2707},
+      {name:"Coimbatore",state:"Tamil Nadu",lat:11.0168,lon:76.9558},{name:"Madurai",state:"Tamil Nadu",lat:9.9252,lon:78.1198},
+      {name:"Salem",state:"Tamil Nadu",lat:11.6643,lon:78.1460},{name:"Tiruchirappalli",state:"Tamil Nadu",lat:10.7905,lon:78.7047},
+      {name:"Kochi",state:"Kerala",lat:9.9312,lon:76.2673},{name:"Thiruvananthapuram",state:"Kerala",lat:8.5241,lon:76.9366},
+      {name:"Kozhikode",state:"Kerala",lat:11.2588,lon:75.7804},{name:"Kannur",state:"Kerala",lat:11.8745,lon:75.3704},
+      {name:"Visakhapatnam",state:"Andhra Pradesh",lat:17.6868,lon:83.2185},{name:"Vijayawada",state:"Andhra Pradesh",lat:16.5062,lon:80.6480},
+      {name:"Guntur",state:"Andhra Pradesh",lat:16.3067,lon:80.4365},{name:"Tirupati",state:"Andhra Pradesh",lat:13.6288,lon:79.4192},
+      {name:"Guwahati",state:"Assam",lat:26.1445,lon:91.7362},{name:"Silchar",state:"Assam",lat:24.8333,lon:92.7789},
+      {name:"Shillong",state:"Meghalaya",lat:25.5788,lon:91.8933},{name:"Aizawl",state:"Mizoram",lat:23.7271,lon:92.7176},
+      {name:"Imphal",state:"Manipur",lat:24.8170,lon:93.9368},{name:"Agartala",state:"Tripura",lat:23.8315,lon:91.2868},
+      {name:"Itanagar",state:"Arunachal Pradesh",lat:27.0844,lon:93.6053},{name:"Kohima",state:"Nagaland",lat:25.6751,lon:94.1086},
+      {name:"Gangtok",state:"Sikkim",lat:27.3389,lon:88.6065},{name:"Srinagar",state:"Jammu and Kashmir",lat:34.0837,lon:74.7973},
+      {name:"Jammu",state:"Jammu and Kashmir",lat:32.7266,lon:74.8570},{name:"Leh",state:"Ladakh",lat:34.1526,lon:77.5771},
+      {name:"Chandigarh",state:"Chandigarh",lat:30.7333,lon:76.7794},{name:"Dehradun",state:"Uttarakhand",lat:30.3165,lon:78.0322},
+      {name:"Haridwar",state:"Uttarakhand",lat:29.9457,lon:78.1642},{name:"Shimla",state:"Himachal Pradesh",lat:31.1048,lon:77.1734},
+      {name:"Dharamshala",state:"Himachal Pradesh",lat:32.2190,lon:76.3234},{name:"Panaji",state:"Goa",lat:15.4909,lon:73.8278},
+      {name:"Margao",state:"Goa",lat:15.2993,lon:73.9878},{name:"Port Blair",state:"Andaman and Nicobar",lat:11.6234,lon:92.7265},
+      {name:"Kavaratti",state:"Lakshadweep",lat:10.5669,lon:72.6420},{name:"Daman",state:"Dadra and Nagar Haveli and Daman and Diu",lat:20.3974,lon:72.8328},
+      {name:"Silvassa",state:"Dadra and Nagar Haveli and Daman and Diu",lat:20.2739,lon:73.0087},{name:"Puducherry",state:"Puducherry",lat:11.9416,lon:79.8083}
+    ];
+
+    const APP_CONFIG = {
+      remoteDatasetUrl: "https://raw.githubusercontent.com/lutangar/cities.json/master/cities.json",
+      weatherApiBase: "https://api.open-meteo.com/v1/forecast",
+      maxMarkers: 220,
+      searchOptionsLimit: 4000,
+      initialView: [22.5, 79],
+      initialZoom: 5,
+      cityZoom: 9,
+      defaultCityName: "nanded",
+      timezone: "Asia/Kolkata",
+      forecastDays: 7
+    };
+
+    const WEATHER_LABELS = {
+      0: "Clear sky ☀️",
+      1: "Mainly clear 🌤️",
+      2: "Partly cloudy ⛅",
+      3: "Overcast ☁️",
+      45: "Fog 🌫️",
+      48: "Rime fog 🌫️",
+      51: "Light drizzle 💧",
+      53: "Moderate drizzle 💧",
+      55: "Dense drizzle 💧",
+      61: "Slight rain 🌦️",
+      63: "Moderate rain 🌧️",
+      65: "Heavy rain 🌧️",
+      80: "Slight rain showers 🌦️",
+      81: "Moderate rain showers 🌦️",
+      82: "Violent rain showers 🌦️",
+      95: "Thunderstorm ⛈️",
+      96: "Thunder + slight hail ⛈️",
+      99: "Thunder + heavy hail ⛈️"
+    };
+
+    const elements = {
+      citySearch: document.getElementById("citySearch"),
+      cityOptions: document.getElementById("cityOptions"),
+      goButton: document.getElementById("goBtn"),
+      panel: document.getElementById("panel"),
+      modePill: document.getElementById("modePill"),
+      cityCountPill: document.getElementById("cityCountPill"),
+      markerCountPill: document.getElementById("markerCountPill")
+    };
+
+    const state = {
+      allCities: [],
+      datasetMode: "fallback",
+      markerLayer: L.layerGroup()
+    };
+
+    const map = L.map("map").setView(APP_CONFIG.initialView, APP_CONFIG.initialZoom);
+
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      subdomains: "abcd",
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+    }).addTo(map);
+
+    state.markerLayer.addTo(map);
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function formatList(items) {
+      return items.map(item => `<li>${escapeHtml(item)}</li>`).join("");
+    }
+
+    function toFloat(value, fallback = 0) {
+      if (value === null || value === undefined) return fallback;
+      const parsed = Number(String(value).replace("%", "").trim());
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function weatherDescription(code) {
+      return WEATHER_LABELS[code] || `Unknown (${code})`;
+    }
+
+    function createWeatherUrl(city) {
+      const params = new URLSearchParams({
+        latitude: city.lat,
+        longitude: city.lon,
+        current_weather: "true",
+        hourly: "relativehumidity_2m",
+        daily: "weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum",
+        timezone: APP_CONFIG.timezone,
+        forecast_days: String(APP_CONFIG.forecastDays)
+      });
+      return `${APP_CONFIG.weatherApiBase}?${params.toString()}`;
+    }
+
+    function cityKey(city) {
+      return `${city.name.toLowerCase()}|${city.state.toLowerCase()}`;
+    }
+
+    function normalizeCity(raw) {
+      const name = raw.name || raw.city || "";
+      const stateName = raw.state || raw.admin_name || raw.subcountry || raw.region || "India";
+      const country = raw.country || raw.country_name || "India";
+      const lat = Number(raw.lat || raw.latitude);
+      const lon = Number(raw.lon || raw.lng || raw.longitude);
+
+      if (!name || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      if (String(country).toLowerCase() !== "india") return null;
+
+      return { name, state: stateName, lat, lon };
+    }
+
+    function dedupeCities(cities) {
+      const unique = new Map();
+      cities.forEach(city => {
+        const key = cityKey(city);
+        if (!unique.has(key)) unique.set(key, city);
+      });
+      return Array.from(unique.values());
+    }
+
+    async function loadCityDataset() {
+      try {
+        const response = await fetch(APP_CONFIG.remoteDatasetUrl);
+        const data = await response.json();
+        const normalized = data.map(normalizeCity).filter(Boolean);
+        if (!normalized.length) throw new Error("Remote dataset was empty");
+        state.allCities = dedupeCities(normalized);
+        state.datasetMode = "remote";
+      } catch {
+        state.allCities = dedupeCities(INDIA_CITY_FALLBACK);
+        state.datasetMode = "fallback";
+      }
+    }
+
+    function updateStatus(visibleCount = 0) {
+      elements.modePill.textContent = `Dataset: ${state.datasetMode === "remote" ? "Remote India List" : "Fallback India List"}`;
+      elements.cityCountPill.textContent = `Cities: ${state.allCities.length}`;
+      elements.markerCountPill.textContent = `Visible Markers: ${visibleCount}`;
+    }
+
+    function getVisibleCities() {
+      const bounds = map.getBounds();
+      return state.allCities
+        .filter(city => bounds.contains([city.lat, city.lon]))
+        .slice(0, APP_CONFIG.maxMarkers);
+    }
+
+    function renderMarkersByBounds() {
+      state.markerLayer.clearLayers();
+
+      const visibleCities = getVisibleCities();
+      visibleCities.forEach(city => {
+        const marker = L.marker([city.lat, city.lon]);
+        marker.bindTooltip(`${city.name}, ${city.state}`);
+        marker.on("click", () => loadCityWeather(city));
+        state.markerLayer.addLayer(marker);
+      });
+
+      updateStatus(visibleCities.length);
+    }
+
+    function populateSearchOptions() {
+      elements.cityOptions.innerHTML = state.allCities
+        .slice(0, APP_CONFIG.searchOptionsLimit)
+        .map(city => `<option value="${escapeHtml(`${city.name}, ${city.state}`)}"></option>`)
+        .join("");
+    }
+
+    function findCity(query) {
+      const normalizedQuery = query.trim().toLowerCase();
+      if (!normalizedQuery) return null;
+
+      return state.allCities.find(city => `${city.name}, ${city.state}`.toLowerCase() === normalizedQuery)
+        || state.allCities.find(city => city.name.toLowerCase() === normalizedQuery)
+        || state.allCities.find(city => `${city.name} ${city.state}`.toLowerCase().includes(normalizedQuery))
+        || null;
+    }
+
+    function jumpToSearch() {
+      const city = findCity(elements.citySearch.value);
+      if (!city) return;
+
+      map.setView([city.lat, city.lon], APP_CONFIG.cityZoom);
+      loadCityWeather(city);
+      window.setTimeout(renderMarkersByBounds, 300);
+    }
+
+    function setupSearch() {
+      populateSearchOptions();
+      elements.goButton.addEventListener("click", jumpToSearch);
+      elements.citySearch.addEventListener("keydown", event => {
+        if (event.key === "Enter") jumpToSearch();
+      });
+    }
+
+    function basicWeather(info) {
+      if (!info) return ["No live weather data available for summary."];
+
+      const temperature = toFloat(info.temperature);
+      const windspeed = toFloat(info.windspeed);
+      const humidity = toFloat(info.humidity);
+      const weatherCode = info.weathercode;
+      const summary = [];
+
+      if (temperature >= 40) summary.push("Extreme heat discomfort expected.");
+      else if (temperature >= 34) summary.push("High heat discomfort likely during daytime.");
+      else if (temperature >= 26) summary.push("Warm conditions with moderate comfort.");
+      else if (temperature >= 18) summary.push("Comfortable weather for most outdoor tasks.");
+      else summary.push("Cool conditions; early morning chill possible.");
+
+      if (humidity >= 80) summary.push("Very humid air; rain chance can increase.");
+      else if (humidity >= 60) summary.push("Moderate humidity.");
+      else summary.push("Dry to mild humidity levels.");
+
+      if ([61, 63, 65, 80, 81, 82].includes(weatherCode)) summary.push("Rain-related weather pattern active.");
+      if ([95, 96, 99].includes(weatherCode)) summary.push("Thunderstorm pattern detected.");
+      if (windspeed >= 30) summary.push("Strong winds may impact light outdoor setups.");
+
+      return summary;
+    }
+
+    function hyperLocalAlerts(info) {
+      if (!info) return [{ type: "Data", severity: "Low", message: "Live weather data unavailable." }];
+
+      const temperature = toFloat(info.temperature);
+      const windspeed = toFloat(info.windspeed);
+      const humidity = toFloat(info.humidity);
+      const weatherCode = info.weathercode;
+      const alerts = [];
+
+      if (temperature >= 43) alerts.push({ type: "Heat", severity: "Extreme", message: "Severe heatwave risk." });
+      else if (temperature >= 38) alerts.push({ type: "Heat", severity: "High", message: "Hot conditions; avoid afternoon exposure." });
+      else if (temperature >= 34) alerts.push({ type: "Heat", severity: "Moderate", message: "Daytime heat stress possible." });
+
+      if ([65, 82].includes(weatherCode)) alerts.push({ type: "Rain", severity: "High", message: "Heavy rain showers possible." });
+      else if ([63, 81].includes(weatherCode)) alerts.push({ type: "Rain", severity: "Moderate", message: "Moderate rainfall expected." });
+      else if ([61, 80].includes(weatherCode)) alerts.push({ type: "Rain", severity: "Low", message: "Light rain likely." });
+
+      if ([95, 96, 99].includes(weatherCode)) {
+        alerts.push({
+          type: "Thunderstorm",
+          severity: weatherCode === 99 ? "Extreme" : "High",
+          message: "Electrical storm risk detected."
+        });
+      }
+
+      if (windspeed >= 45) alerts.push({ type: "Wind", severity: "High", message: "Strong winds may damage weak structures." });
+      else if (windspeed >= 30) alerts.push({ type: "Wind", severity: "Moderate", message: "Gusty wind conditions." });
+
+      if ([45, 48].includes(weatherCode)) alerts.push({ type: "Visibility", severity: "Moderate", message: "Fog may reduce visibility." });
+      if (humidity >= 90 && temperature >= 32) alerts.push({ type: "Humidity", severity: "Moderate", message: "Humid heat can cause additional stress." });
+      if (!alerts.length) alerts.push({ type: "General", severity: "Low", message: "No major weather alert at the moment." });
+
+      return alerts;
+    }
+
+    function farmerAdvice(info, alerts) {
+      if (!info) return ["Use offline seasonal plan and monitor next update for field decisions."];
+
+      const temperature = toFloat(info.temperature);
+      const windspeed = toFloat(info.windspeed);
+      const humidity = toFloat(info.humidity);
+      const weatherCode = info.weathercode;
+      const severeWeather = alerts.some(alert => ["High", "Extreme"].includes(alert.severity));
+      const alertTypes = new Set(alerts.map(alert => alert.type));
+      const advice = [];
+
+      if (temperature >= 36 && ![61, 63, 65, 80, 81, 82].includes(weatherCode)) {
+        advice.push("Increase irrigation frequency in early morning/evening to reduce evaporation losses.");
+      } else if ([63, 65, 81, 82].includes(weatherCode)) {
+        advice.push("Reduce irrigation; expected rainfall may meet short-term water needs.");
+      }
+
+      if (windspeed >= 25) advice.push("Avoid pesticide/fertilizer spraying during windy periods to reduce drift.");
+      else advice.push("If needed, schedule spraying in low-wind windows (morning).");
+
+      if ([61, 63, 65, 80, 81, 82].includes(weatherCode)) {
+        advice.push("Ensure field drainage channels are clear to prevent waterlogging.");
+        advice.push("Protect harvested produce from moisture ingress.");
+      }
+
+      if (temperature >= 38) {
+        advice.push("Use mulching to conserve soil moisture and protect roots from heat stress.");
+        advice.push("Provide extra water and shade for livestock.");
+      }
+
+      if (humidity >= 80) advice.push("High humidity may increase fungal disease risk; monitor leaves closely.");
+      if (severeWeather || alertTypes.has("Thunderstorm")) advice.push("Postpone sensitive farm operations until severe weather window passes.");
+      if (!advice.length) advice.push("Conditions are relatively stable; continue regular farm schedule with routine monitoring.");
+
+      return advice;
+    }
+
+    function safetyTips(alerts) {
+      const alertTypes = new Set(alerts.map(alert => alert.type));
+      const severityRank = { Low: 1, Moderate: 2, High: 3, Extreme: 4 };
+      const tips = [];
+
+      const highestSeverity = alerts.reduce((current, alert) => {
+        return (severityRank[alert.severity] || 1) > (severityRank[current] || 1) ? alert.severity : current;
+      }, "Low");
+
+      if (alertTypes.has("Heat")) {
+        tips.push("Stay hydrated and avoid prolonged direct sun between 12 PM and 4 PM.");
+        tips.push("Use light cotton clothing and keep ORS available for heat stress.");
+      }
+      if (alertTypes.has("Rain")) {
+        tips.push("Avoid crossing waterlogged roads and low-lying areas.");
+        tips.push("Keep electrical equipment elevated and dry.");
+      }
+      if (alertTypes.has("Thunderstorm")) {
+        tips.push("Stay indoors during thunder activity and unplug sensitive electronics.");
+        tips.push("Avoid sheltering under isolated trees or near metal poles.");
+      }
+      if (alertTypes.has("Wind")) {
+        tips.push("Secure loose sheets, boards, and light rooftop objects.");
+        tips.push("Avoid standing near weak hoardings and old trees.");
+      }
+      if (alertTypes.has("Visibility")) {
+        tips.push("Drive slowly with lights on in fog-prone periods.");
+        tips.push("Use reflective markers for roadside and farm paths.");
+      }
+      if (!tips.length) tips.push("No special hazard tips needed now; continue normal caution outdoors.");
+      if (["High", "Extreme"].includes(highestSeverity)) tips.push("Keep emergency contacts and a charged phone ready as a precaution.");
+
+      return tips;
+    }
+
+    function aiPrediction(info, daily) {
+      if (!info) return { score: 20, label: "Watch", insight: "Limited live data; prediction confidence is low." };
+
+      const temperature = toFloat(info.temperature);
+      const windspeed = toFloat(info.windspeed);
+      const humidity = toFloat(info.humidity);
+      const weatherCode = info.weathercode;
+      const maxTemps = daily.temperature_2m_max || [];
+      const rainTotals = daily.precipitation_sum || [];
+      const weatherCodes = daily.weathercode || [];
+      let score = 0;
+
+      if (temperature >= 42) score += 30;
+      else if (temperature >= 37) score += 20;
+      else if (temperature >= 33) score += 10;
+
+      if (windspeed >= 45) score += 20;
+      else if (windspeed >= 30) score += 10;
+
+      if (humidity >= 90 && temperature >= 32) score += 10;
+
+      if ([65, 82].includes(weatherCode)) score += 18;
+      else if ([63, 81].includes(weatherCode)) score += 12;
+      else if ([61, 80].includes(weatherCode)) score += 7;
+      else if ([95, 96, 99].includes(weatherCode)) score += 25;
+
+      if (maxTemps.length) {
+        const peakTemperature = Math.max(...maxTemps);
+        if (peakTemperature >= 42) score += 12;
+        else if (peakTemperature >= 38) score += 8;
+      }
+
+      if (rainTotals.length) {
+        const peakRain = Math.max(...rainTotals);
+        if (peakRain >= 25) score += 12;
+        else if (peakRain >= 10) score += 8;
+        else if (peakRain >= 2) score += 4;
+      }
+
+      if (weatherCodes.some(code => [95, 96, 99].includes(code))) score += 10;
+
+      score = Math.min(100, score);
+
+      if (score >= 75) return { score, label: "Critical", insight: "High-impact weather risk likely in the near term." };
+      if (score >= 50) return { score, label: "Risky", insight: "Elevated weather risk; prepare mitigation steps." };
+      if (score >= 30) return { score, label: "Watch", insight: "Moderate risk signals detected; monitor updates." };
+      return { score, label: "Stable", insight: "No major short-term weather threat detected." };
+    }
+
+    function formatForecastRows(daily) {
+      const dates = daily.time || [];
+      const minTemps = daily.temperature_2m_min || [];
+      const maxTemps = daily.temperature_2m_max || [];
+      const weatherCodes = daily.weathercode || [];
+
+      if (!dates.length) return "<tr><td colspan='4'>No forecast data.</td></tr>";
+
+      return dates.map((date, index) => {
+        const [year, month, day] = date.split("-");
+        return `
+          <tr>
+            <td>${escapeHtml(`${day || "--"}/${month || "--"}`)}</td>
+            <td>${escapeHtml(minTemps[index] ?? "-")}</td>
+            <td>${escapeHtml(maxTemps[index] ?? "-")}</td>
+            <td>${escapeHtml(weatherDescription(weatherCodes[index]))}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderLoadingState(city) {
+      elements.panel.innerHTML = `
+        <div class="section">
+          <h2>Loading ${escapeHtml(city.name)}...</h2>
+          <p class="muted">Fetching live weather data.</p>
+        </div>
+      `;
+    }
+
+    function renderErrorState(city) {
+      elements.panel.innerHTML = `
+        <div class="section">
+          <h2>${escapeHtml(city.name)}</h2>
+          <p class="muted">Failed to fetch weather data. Check internet and try again.</p>
+        </div>
+      `;
+    }
+
+    function renderCityWeather(city, current, daily, basic, alerts, farmer, safety, ai) {
+      const alertItems = alerts.map(alert => {
+        return `<li><span class="pill sev-${escapeHtml(alert.severity)}">${escapeHtml(alert.severity)}</span> ${escapeHtml(alert.type)}: ${escapeHtml(alert.message)}</li>`;
+      }).join("");
+
+      elements.panel.innerHTML = `
+        <div class="section">
+          <h2>${escapeHtml(city.name)}, ${escapeHtml(city.state)}</h2>
+          <span class="pill">🌡️ Temp: ${escapeHtml(current.temperature ?? "-")}°C</span>
+          <span class="pill">💧 Humidity: ${escapeHtml(current.humidity ?? "-")}%</span>
+          <span class="pill">🌬️ Wind: ${escapeHtml(current.windspeed ?? "-")} km/h</span>
+          <span class="pill">☁️ ${escapeHtml(weatherDescription(current.weathercode))}</span>
+          <p class="muted">Observation: ${escapeHtml(current.time || "-")}</p>
+        </div>
+        <div class="section"><h3>1) Basic Weather</h3><ul>${formatList(basic)}</ul></div>
+        <div class="section"><h3>2) Hyper Local Alerts</h3><ul>${alertItems}</ul></div>
+        <div class="section"><h3>3) Farmer Advice</h3><ul>${formatList(farmer)}</ul></div>
+        <div class="section"><h3>4) Safety Tips</h3><ul>${formatList(safety)}</ul></div>
+        <div class="section"><h3>5) AI Prediction</h3><div class="score">${escapeHtml(ai.score)} / 100</div><span class="pill">Label: ${escapeHtml(ai.label)}</span><p class="muted">${escapeHtml(ai.insight)}</p></div>
+        <div class="section"><h3>6) Weather Forecast (7-day)</h3>
+          <table>
+            <thead><tr><th>Date</th><th>Min °C</th><th>Max °C</th><th>Condition</th></tr></thead>
+            <tbody>${formatForecastRows(daily)}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function buildCurrentInfo(data) {
+      const current = data.current_weather || {};
+      const humiditySeries = data.hourly?.relativehumidity_2m || [];
+
+      return {
+        temperature: current.temperature,
+        windspeed: current.windspeed,
+        weathercode: current.weathercode,
+        time: current.time,
+        humidity: humiditySeries.length ? humiditySeries[0] : "N/A"
+      };
+    }
+
+    async function loadCityWeather(city) {
+      renderLoadingState(city);
+
+      try {
+        const response = await fetch(createWeatherUrl(city));
+        const data = await response.json();
+        const currentInfo = buildCurrentInfo(data);
+        const daily = data.daily || {};
+        const basic = basicWeather(currentInfo);
+        const alerts = hyperLocalAlerts(currentInfo);
+        const farmer = farmerAdvice(currentInfo, alerts);
+        const safety = safetyTips(alerts);
+        const ai = aiPrediction(currentInfo, daily);
+
+        renderCityWeather(city, currentInfo, daily, basic, alerts, farmer, safety, ai);
+      } catch {
+        renderErrorState(city);
+      }
+    }
+
+    function getDefaultCity() {
+      return state.allCities.find(city => city.name.toLowerCase() === APP_CONFIG.defaultCityName) || state.allCities[0] || null;
+    }
+
+    async function init() {
+      await loadCityDataset();
+      setupSearch();
+      map.on("moveend zoomend", renderMarkersByBounds);
+
+      const defaultCity = getDefaultCity();
+      if (defaultCity) {
+        map.setView([defaultCity.lat, defaultCity.lon], 7);
+        loadCityWeather(defaultCity);
+      }
+
+      renderMarkersByBounds();
+    }
+
+    init();
+  </script>
+</body>
+</html>
